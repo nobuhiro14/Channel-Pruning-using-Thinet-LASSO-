@@ -31,6 +31,8 @@ config.max_epoch = 100
 #agent = globals()["VGG_BN_cifar"](config)
 agent = VGG_BN_cifar(config)
 agent.init_graph()
+best,history = agent.train(specializing=False, freeze_conv=False)
+
 agent.load_checkpoint(config.load_file)
 agent.compress(method = 'greedy',k=0.62)
 summary(agent.model, torch.zeros((1, 3, 32, 32)).to(torch.device("cuda")))
