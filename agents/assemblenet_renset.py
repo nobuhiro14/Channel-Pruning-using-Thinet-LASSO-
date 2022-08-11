@@ -15,11 +15,9 @@ import models
 from agents.base import BaseAgent
 from models.resnet import *
 from prune.channel import *
-from datasets.imagenet import *
 from datasets.cifar100 import *
 from utils.metrics import AverageMeter, cls_accuracy
 from utils.misc import timeit, print_cuda_statistics
-from graphs import *
 from math import cos, pi
 
 cudnn.benchmark = True

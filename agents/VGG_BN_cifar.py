@@ -10,12 +10,10 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.autograd as autograd
 
-import torchvision.models as models
 
 from agents.base import BaseAgent
-from graphs.models.vgg import *
+from models.vgg import *
 from prune.channel import *
-from datasets.imagenet import *
 from datasets.cifar100 import *
 
 from utils.metrics import AverageMeter, cls_accuracy
