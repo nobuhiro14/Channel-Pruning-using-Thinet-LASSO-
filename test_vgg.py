@@ -26,21 +26,24 @@ if __name__ == '__main__':
     config.batch_size = 128
     config.async_loading = True
     config.max_epoch = 200
+    config.lr = 0.01 
 
     #torch.cuda.init()
 
     #agent = globals()["VGG_BN_cifar"](config)
     agent = VGG_BN_cifar(config)
     agent.init_graph()
-    best,history = agent.train(specializing=False, freeze_conv=False)
-
-    torch.save(agent.model.state_dict(),"vgg16_pretrained.model")
+    #best,history = agent.train(specializing=False, freeze_conv=False)
+    #torch.save(agent.model.state_dict(),"vgg16_pretrained.model")
+    agent.model.load_state_dict(torch.load("vgg16_pretrained.model"))
+    agent.validate()
 
     agent.load_checkpoint(config.load_file)
     agent.compress(method = 'greedy',k=0.62)
     summary(agent.model, torch.zeros((1, 3, 32, 32)).to(torch.device("cuda")))
-    config.max_epoch = 50
-    config.milestones = [30,45]
+    agent.config.lr = 0.01
+    agent.config.max_epoch = 50
+    agent.config.milestones = [30,45]
     agent.current_epoch = 0
     agent.current_iteration = 0
     best,history = agent.train(specializing=False, freeze_conv=False)

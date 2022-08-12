@@ -259,6 +259,7 @@ class VGG_BN_cifar(BaseAgent):
                     channel_norm = torch.norm(channel_vec,2,1)
                     indices_stayed = torch.argsort(channel_norm, descending=True)[:num_channel]    # 가장 큰 채널들의 index를 리턴
                     module_surgery(m, bn, next_m, indices_stayed)
+                    self.train_after_compress()
 
 
         elif method == 'greedy':
@@ -270,6 +271,7 @@ class VGG_BN_cifar(BaseAgent):
                     indices_stayed, indices_pruned = channel_selection(next_input_features, next_m, sparsity=(1. - k),
                                                                        method='greedy')
                     module_surgery(m, bn, next_m, indices_stayed)
+                    self.train_after_compress()
 
                     next_output_features = self.original_conv_output[str(i + 1) + '.conv']
                     next_m_idx = self.named_conv_idx_list[str(i + 1) + '.conv']
@@ -286,6 +288,7 @@ class VGG_BN_cifar(BaseAgent):
                     indices_stayed, indices_pruned = channel_selection(next_input_features, next_m, sparsity=(1. - k),
                                                                        method='lasso')
                     module_surgery(m, bn, next_m, indices_stayed)
+                    self.train_after_compress()
 
                     next_output_features = self.original_conv_output[str(i + 1) + '.conv']
                     next_m_idx = self.named_conv_idx_list[str(i + 1) + '.conv']
@@ -328,6 +331,47 @@ class VGG_BN_cifar(BaseAgent):
 
         history = []
         for epoch in range(self.config.max_epoch):
+            self.current_epoch = epoch
+            self.train_one_epoch(specializing)
+
+            if specializing:
+                sub_valid_acc = []
+                sub_valid_acc.append(self.validate(specializing))
+                valid_acc = np.mean(sub_valid_acc)
+            else:
+                valid_acc = self.validate(specializing)
+            is_best = valid_acc > self.best_valid_acc
+            if is_best:
+                self.best_valid_acc = valid_acc
+            self.save_checkpoint(is_best=is_best)
+
+            history.append(valid_acc)
+            self.scheduler.step(valid_acc)
+
+        if freeze_conv:
+            for param in self.model.features.parameters():
+                param.requires_grad = True
+
+        return self.best_valid_acc, history
+    
+    @timeit
+    def train_after_compress(self, specializing=False, freeze_conv=False):
+        """
+        Main training function, with per-epoch model saving
+        :return:
+        """
+        if freeze_conv:
+            for param in self.model.features.parameters():
+                param.requires_grad = False
+
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config.lr, momentum=0.9, weight_decay=0.0005,
+                                         nesterov=True)
+        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=self.config.milestones,
+                                                        gamma=self.config.gamma)
+        self.model.to(self.device)
+
+        history = []
+        for epoch in range(2):
             self.current_epoch = epoch
             self.train_one_epoch(specializing)
 
