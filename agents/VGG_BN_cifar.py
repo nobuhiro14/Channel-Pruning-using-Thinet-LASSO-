@@ -320,7 +320,7 @@ class VGG_BN_cifar(BaseAgent):
             for param in self.model.features.parameters():
                 param.requires_grad = False
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005,
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0005,
                                          nesterov=True)
         self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=self.config.milestones,
                                                         gamma=self.config.gamma)

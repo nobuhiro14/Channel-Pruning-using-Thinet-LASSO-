@@ -15,7 +15,7 @@ if __name__ == '__main__':
     config.cuda = True
     config.gpu_device = 0
     config.seed = 1
-    config.milestones = [5, 10,15]
+    config.milestones = [120,160]
     config.gamma = 0.9
     config.img_size = 32
     config.num_classes = 100
@@ -25,7 +25,8 @@ if __name__ == '__main__':
     config.async_loading = True
     config.batch_size = 128
     config.async_loading = True
-    config.max_epoch = 100
+    config.max_epoch = 200
+
     #torch.cuda.init()
 
     #agent = globals()["VGG_BN_cifar"](config)
@@ -33,9 +34,15 @@ if __name__ == '__main__':
     agent.init_graph()
     best,history = agent.train(specializing=False, freeze_conv=False)
 
+    torch.save(agent.model.state_dict(),"vgg16_pretrained.model")
+
     agent.load_checkpoint(config.load_file)
     agent.compress(method = 'greedy',k=0.62)
     summary(agent.model, torch.zeros((1, 3, 32, 32)).to(torch.device("cuda")))
+    config.max_epoch = 50
+    config.milestones = [30,45]
+    agent.current_epoch = 0
+    agent.current_iteration = 0
     best,history = agent.train(specializing=False, freeze_conv=False)
     torch.save(agent.model.state_dict(),"vgg16.model")
 
