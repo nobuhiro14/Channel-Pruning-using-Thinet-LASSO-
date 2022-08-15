@@ -72,7 +72,7 @@ class VGG_BN_cifar(BaseAgent):
 
         self.init_graph()
 
-    def init_graph(self, pretrained=True, init_channel_importance=True):     # 모델 그래프와 정보를 초기화
+    def init_graph(self, BN=False, init_channel_importance=True):     # 모델 그래프와 정보를 초기화
         # set model graph & information holder
         self.model = vgg16(input_shape=self.config.img_size, num_classes=self.config.num_classes, batch_norm=False)
         self.loss_fn = nn.CrossEntropyLoss()
@@ -110,6 +110,9 @@ class VGG_BN_cifar(BaseAgent):
                 self.named_modules_idx_list['{}.bn'.format(i)] = idx
                 self.named_modules_list['{}.bn'.format(i)] = m
             elif isinstance(m, torch.nn.ReLU):
+                if BN ==False :
+                    self.named_modules_idx_list['{}.bn'.format(i)] = None
+                    self.named_modules_list['{}.bn'.format(i)] = None
                 i += 1
 
         if init_channel_importance is True:
