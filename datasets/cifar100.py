@@ -33,7 +33,7 @@ class Cifar100DataLoader:
             train_transform = transforms.Compose([
                 transforms.RandomCrop(32, padding=4),
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),
+                #transforms.RandomRotation(15),
                 transforms.ToTensor(),
                 transforms.Normalize(self.mean, self.std)])
 

@@ -109,8 +109,9 @@ class VGG_BN_cifar(BaseAgent):
             elif isinstance(m, torch.nn.BatchNorm2d):
                 self.named_modules_idx_list['{}.bn'.format(i)] = idx
                 self.named_modules_list['{}.bn'.format(i)] = m
+                BN = True 
             elif isinstance(m, torch.nn.ReLU):
-                if BN ==False :
+                if BN==False:
                     self.named_modules_idx_list['{}.bn'.format(i)] = None
                     self.named_modules_list['{}.bn'.format(i)] = None
                 i += 1
@@ -226,7 +227,7 @@ class VGG_BN_cifar(BaseAgent):
             inputs = inputs.cuda(non_blocking=self.config.async_loading)
         self.record_conv_output(inputs)
         
-        if method == 'manual':  # 미리 저장된 레이어당 채널 번호로 프루닝
+        if method == 'manual':  # Pruning with pre-stored per-layer channel numbers
             for i, m in enumerate(self.named_conv_list.values()):
                 if isinstance(m, torch.nn.Conv2d):
                     bn = self.named_modules_list[str(i) + '.bn']
@@ -241,11 +242,11 @@ class VGG_BN_cifar(BaseAgent):
                         next_output_features = self.original_conv_output[str(i + 1) + '.conv']
                         next_m_idx = self.named_conv_idx_list[str(i + 1) + '.conv']
                         pruned_next_inputs_features = self.model.features[:next_m_idx](inputs)
-                        weight_reconstruction(next_m, pruned_next_inputs_features, next_output_features, use_gpu=self.cuda)
+                        0(next_m, pruned_next_inputs_features, next_output_features, use_gpu=self.cuda)
                 self.stayed_channels[str(i) + '.conv1'] = set(indices_stayed)
 
         elif method == 'max_output': # NO weight reconstuction
-            for i, m in enumerate(list(self.named_conv_list.values())[:-1]):    # 마지막 레이어 전까지
+            for i, m in enumerate(list(self.named_conv_list.values())[:-1]):    # until the last layer
                 if isinstance(m, torch.nn.Conv2d):
                     bn = self.named_modules_list[str(i) + '.bn']
                     if str(i + 1) + '.conv' in self.named_conv_list:
@@ -258,10 +259,11 @@ class VGG_BN_cifar(BaseAgent):
                     channel_norm = torch.norm(channel_vec,2,1)
                     indices_stayed = torch.argsort(channel_norm, descending=True)[:num_channel]    # 가장 큰 채널들의 index를 리턴
                     module_surgery(m, bn, next_m, indices_stayed)
+                    self.train_after_compress()
 
 
         elif method == 'greedy':
-            for i, m in enumerate(list(self.named_conv_list.values())[:-1]):    # 마지막 레이어 전까지
+            for i, m in enumerate(list(self.named_conv_list.values())[:-1]):    # until the last layer
                 if isinstance(m, torch.nn.Conv2d):
                     next_m_idx = self.named_modules_idx_list[str(i + 1) + '.conv']
                     bn, next_m = self.named_modules_list[str(i) + '.bn'], self.named_modules_list[str(i + 1) + '.conv']
@@ -269,6 +271,7 @@ class VGG_BN_cifar(BaseAgent):
                     indices_stayed, indices_pruned = channel_selection(next_input_features, next_m, sparsity=(1. - k),
                                                                        method='greedy')
                     module_surgery(m, bn, next_m, indices_stayed)
+                    self.train_after_compress()
 
                     next_output_features = self.original_conv_output[str(i + 1) + '.conv']
                     next_m_idx = self.named_conv_idx_list[str(i + 1) + '.conv']
@@ -285,6 +288,7 @@ class VGG_BN_cifar(BaseAgent):
                     indices_stayed, indices_pruned = channel_selection(next_input_features, next_m, sparsity=(1. - k),
                                                                        method='lasso')
                     module_surgery(m, bn, next_m, indices_stayed)
+                    self.train_after_compress()
 
                     next_output_features = self.original_conv_output[str(i + 1) + '.conv']
                     next_m_idx = self.named_conv_idx_list[str(i + 1) + '.conv']
@@ -319,7 +323,7 @@ class VGG_BN_cifar(BaseAgent):
             for param in self.model.features.parameters():
                 param.requires_grad = False
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005,
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config.lr, momentum=0.9, weight_decay=0.0005,
                                          nesterov=True)
         self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=self.config.milestones,
                                                         gamma=self.config.gamma)
@@ -327,6 +331,47 @@ class VGG_BN_cifar(BaseAgent):
 
         history = []
         for epoch in range(self.config.max_epoch):
+            self.current_epoch = epoch
+            self.train_one_epoch(specializing)
+
+            if specializing:
+                sub_valid_acc = []
+                sub_valid_acc.append(self.validate(specializing))
+                valid_acc = np.mean(sub_valid_acc)
+            else:
+                valid_acc = self.validate(specializing)
+            is_best = valid_acc > self.best_valid_acc
+            if is_best:
+                self.best_valid_acc = valid_acc
+            self.save_checkpoint(is_best=is_best)
+
+            history.append(valid_acc)
+            self.scheduler.step(valid_acc)
+
+        if freeze_conv:
+            for param in self.model.features.parameters():
+                param.requires_grad = True
+
+        return self.best_valid_acc, history
+    
+    @timeit
+    def train_after_compress(self, specializing=False, freeze_conv=False):
+        """
+        Main training function, with per-epoch model saving
+        :return:
+        """
+        if freeze_conv:
+            for param in self.model.features.parameters():
+                param.requires_grad = False
+
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config.lr, momentum=0.9, weight_decay=0.0005,
+                                         nesterov=True)
+        self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=self.config.milestones,
+                                                        gamma=self.config.gamma)
+        self.model.to(self.device)
+
+        history = []
+        for epoch in range(2):
             self.current_epoch = epoch
             self.train_one_epoch(specializing)
 
@@ -375,7 +420,7 @@ class VGG_BN_cifar(BaseAgent):
                 x, y = x.cuda(non_blocking=self.config.async_loading), y.cuda(non_blocking=self.config.async_loading)
 
             self.optimizer.zero_grad()
-            self.adjust_learning_rate(self.optimizer, self.current_epoch, i, self.data_loader.train_iterations)
+            #self.adjust_learning_rate(self.optimizer, self.current_epoch, i, self.data_loader.train_iterations)
 
             pred = self.model(x)
             cur_loss = self.loss_fn(pred, y)

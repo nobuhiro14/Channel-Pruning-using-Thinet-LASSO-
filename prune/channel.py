@@ -9,8 +9,8 @@ num_pruned_tolerate_coeff = 1.1
 
 def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
     """
-    현재 모듈의 입력 채널중, 중요도가 높은 채널을 선택합니다.
-    기존의 output을 가장 근접하게 만들어낼 수 있는 입력 채널을 찾아냅니댜.
+    Among the input channels of the current module, select the most important channel.
+    Find the input channel that can most closely match the existing output.
     :param inputs: torch.Tensor, input features map
     :param module: torch.nn.module, layer
     :param sparsity: float, 0 ~ 1 how many prune channel of output of this layer
@@ -18,8 +18,11 @@ def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
     :return:
         list of int, indices of channel to be selected and pruned
     """
-    num_channel = inputs.size(1)  # 채널 수
-    num_pruned = int(math.ceil(num_channel * sparsity))  # 입력된 sparsity 에 맞춰 삭제되어야 하는 채널 수
+    num_channel = inputs.size(1)  # number of channels
+    num_pruned = int(math.ceil(num_channel * sparsity))  # Number of channels to be deleted according to the input sparsity
+    if num_pruned %4 != 0:
+        gap = num_pruned%4 
+        num_pruned -= gap 
     num_stayed = num_channel - num_pruned
 
     print('num_pruned', num_pruned)
@@ -81,7 +84,7 @@ def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
             bias_size = [1] * y.dim()  # bias_size: [1, 1, 1, 1]
             bias_size[1] = -1  # [1, -1, 1, 1]
             bias = module.bias.view(bias_size)  # bias.view([1, -1, 1, 1] = [1, N, 1, 1])
-            y -= bias  # output feature 에서 bias 만큼을 빼줌 (y - b)
+            y -= bias  # Subtract the amount of bias from the output feature (y - b)
         else:
             bias = 0.
         y = y.view(-1).data.cpu().numpy()  # flatten all of outputs
@@ -102,7 +105,7 @@ def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
         #
         # del y_channel_spread, y
 
-        # 원하는 수의 채널이 삭제될 때까지 alpha 값을 조금씩 늘려나감
+        # Gradually increase the alpha value until the desired number of channels are deleted.
         alpha_l, alpha_r = 0, alpha
         num_pruned_try = 0
         while num_pruned_try < num_pruned:
@@ -112,7 +115,9 @@ def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
             solver.fit(y_channel_spread,y)
             num_pruned_try = sum(solver.coef_ == 0)
 
-        # 충분하게 pruning 되는 alpha 를 찾으면, 이후 alpha 값의 좌우를 좁혀 나가면서 좀 더 정확한 alpha 값을 찾음
+        # After finding an alpha that is sufficiently pruned, 
+        # the left and right sides of the alpha value are narrowed 
+        # to find a more accurate alpha value.
         num_pruned_max = int(num_pruned)
         while True:
             alpha = (alpha_l + alpha_r) / 2
@@ -128,7 +133,7 @@ def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
             else:
                 break
 
-        # 마지막으로, lasso coeff를 index로 변환
+        # Finally, convert lasso coeff to index
         indices_stayed = np.where(solver.coef_ != 0)[0].tolist()
         indices_pruned = np.where(solver.coef_ == 0)[0].tolist()
 
@@ -138,12 +143,12 @@ def channel_selection(inputs, module, sparsity=0.5, method='greedy'):
     inputs = inputs.cuda()
     module = module.cuda()
 
-    return indices_stayed, indices_pruned  # 선택된 채널의 인덱스를 리턴
+    return indices_stayed, indices_pruned  # Returns the index of the selected channel
 
 
 def module_surgery(module ,attached_module,next_module, indices_stayed):
     """
-    선택된 less important 필터/채널을 프루닝합니다.
+    Select less important filter
     :param module: torch.nn.module, module of the Conv layer (be pruned for filters)
     :param attached_module: torch.nn.module, series of modules following the this layer (like BN)
     :param next_module: torch.nn.module, module of the next layer (be pruned for channels)
@@ -196,9 +201,11 @@ def module_surgery(module ,attached_module,next_module, indices_stayed):
 
 def weight_reconstruction(module, inputs, outputs, use_gpu=False):
     """
-    이전 레이어의 프루닝이 수행되고 나면, 현재 레이어의 pruned output 을 이용하여 다음 레이어의 weight 를 조정합니다
-    프루닝 된 레이어의 output 을 X로, 다음 레이어의 output 값(이 때 original model's output 값)을 Y로 두고 least square 를 풀게 됩니다.
-    이렇게 구해진 parameter 를 다음 레이어의 weight 로 삼게 됩니다.
+    After pruning of the previous layer is performed, the weight of the next layer is a
+    djusted using the pruned output of the current layer.
+    The least square is solved by setting the output of the pruned layer to X and 
+    the output value of the next layer (in this case, the original model's output value) to Y.
+    The parameter obtained in this way will be used as the weight of the next layer.
     reconstruct the weight of the next layer to the one being pruned
     :param module: torch.nn.module, module of the this layer
     :param inputs: torch.Tensor, new input feature map of the this layer
@@ -214,19 +221,19 @@ def weight_reconstruction(module, inputs, outputs, use_gpu=False):
     if module.bias is not None:
         bias_size = [1] * outputs.dim()
         bias_size[1] = -1
-        outputs -= module.bias.view(bias_size)  # output feature 에서 bias 만큼을 빼줌 (y - b)
+        outputs -= module.bias.view(bias_size)  #Subtract the amount of bias from the output feature (y - b)
     if isinstance(module, torch.nn.Conv2d):
         unfold = torch.nn.Unfold(kernel_size=module.kernel_size, dilation=module.dilation,
                                  padding=module.padding, stride=module.stride)
         if use_gpu:
             unfold = unfold.cuda()
         unfold.eval()
-        x = unfold(inputs)  # 하나의 패치(reception field)를 열로 하는 3차원배열로 펼침 (N * KKC * L(number of fields))
-        x = x.transpose(1, 2)  # 텐서를 transpose (N * KKC * L) -> (N * L * KKC)
+        x = unfold(inputs)  # Spread one patch (reception field) into a three-dimensional array with columns (N * KKC * L(number of fields))
+        x = x.transpose(1, 2)  # tensor transpose (N * KKC * L) -> (N * L * KKC)
         num_fields = x.size(0) * x.size(1)
         x = x.reshape(num_fields, -1)  # x: (NL * KKC)
-        y = outputs.view(outputs.size(0), outputs.size(1), -1)  # feature map 하나를 행으로 하는 배열로 펼침 (N * C * WH)
-        y = y.transpose(1, 2)  # 텐서를 transpose (N * C * HW) -> (N * HW * C), L == HW
+        y = outputs.view(outputs.size(0), outputs.size(1), -1)  # feature map (N * C * WH)
+        y = y.transpose(1, 2)  # tensor transpose (N * C * HW) -> (N * HW * C), L == HW
         y = y.reshape(-1, y.size(2))  # y: (NHW * C),  (NHW) == (NL)
 
         if x.size(0) < x.size(1) or use_gpu is False:

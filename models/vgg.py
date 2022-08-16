@@ -14,16 +14,23 @@ class VGG(nn.Module):
     def __init__(self, vgg_name, input_shape=224, num_classes=1000, batch_norm=False, init_weights=True):
         super(VGG, self).__init__()
         self.features = self._make_layers(cfg[vgg_name], batch_norm=batch_norm)
-        self.classifier = nn.Sequential(
-            nn.Linear(512 * int(input_shape/2**5) * int(input_shape/2**5), 4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(4096, num_classes),
-        )
-
+        if num_classes == 10 :
+            self.classifier = nn.Sequential(
+                nn.Linear(512 * int(input_shape/2**5) * int(input_shape/2**5), 4096),
+                nn.ReLU(inplace=True),
+                nn.Dropout(),
+                nn.Linear(4096, 4096),
+                nn.ReLU(inplace=True),
+                nn.Dropout(),
+                nn.Linear(4096, num_classes),
+            )
+        else :
+             self.classifier = nn.Sequential(
+                nn.Linear(512 * int(input_shape/2**5) * int(input_shape/2**5), 512),
+                nn.ReLU(inplace=True),
+                nn.Dropout(),
+                nn.Linear(512, num_classes),
+            )
         if init_weights:
             self._initialize_weights()
 
